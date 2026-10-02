@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>注册 - 直播间</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-box">
+    <h1>注册账号</h1>
+    <div class="sub">注册后可以聊天、私信、加好友、发布图文视频；实名认证后开通直播权限</div>
+    <div class="field"><label>手机号 *</label><input class="input" id="phone" placeholder="登录账号，唯一"></div>
+    <div class="field"><label>邮箱 *</label><input class="input" id="email" placeholder="找回密码用，唯一"></div>
+    <div class="field"><label>用户名 *</label><input class="input" id="username" placeholder="2-20 个字符，唯一"></div>
+    <div class="field"><label>密码 *</label><input class="input" id="password" type="password" placeholder="至少 6 位（RSA 加密传输）"></div>
+    <div class="grid grid-2" style="gap:10px;">
+      <div class="field"><label>性别 *</label>
+        <select class="input" id="gender"><option>保密</option><option>男</option><option>女</option></select>
+      </div>
+      <div class="field"><label>生日 *</label><input class="input" id="birthday" type="date"></div>
+    </div>
+    <div class="field"><label>所在城市 *</label><input class="input" id="city" placeholder="如：四川 成都"></div>
+    <div class="field"><label>喜好标签（选 1-8 个，可点选）</label>
+      <div class="tag-pick" id="tags"></div>
+    </div>
+    <label class="agree"><input type="checkbox" id="agree">
+      <span>我已阅读并同意 <a href="javascript:;" id="showAgreement">《用户协议与隐私政策》</a>，知悉平台将收集我的性别、生日、城市与设备信息用于内容推荐和平台数据统计。</span>
+    </label>
+    <button class="btn btn-primary" id="btnReg" style="width:100%;">注 册</button>
+    <div class="links"><span class="muted">已有账号？</span><a href="/login.html">直接登录</a></div>
+  </div>
+</div>
+
+<div class="modal-mask" id="agreeMask" style="display:none;">
+  <div class="modal">
+    <button class="m-close" id="agreeClose">✕</button>
+    <h3>用户协议与隐私政策</h3>
+    <div style="line-height:1.9;font-size:13px;color:var(--sub);max-height:50vh;overflow-y:auto;">
+      <p>1. 用户注册需提供手机号、邮箱、用户名、密码，并选填性别、生日、所在城市、喜好标签。</p>
+      <p>2. 平台自动采集设备信息（设备类型、操作系统、浏览器、设备指纹）与在线时间，用于安全风控与数据统计大屏。</p>
+      <p>3. 开通直播权限需提交真实姓名与身份证号，管理员审核通过后方可开播；未实名用户仅可浏览与发布图文视频。</p>
+      <p>4. 用户发布的内容（聊天、图文、视频、弹幕）须合法合规，平台有权通过 AI 与人工方式审核，违规内容将被下架，发布者将收到通知并可联系客服申诉。</p>
+      <p>5. 礼物打赏将产生平台服务费（20%），余额可申请提现，提现需经后台审核对账。</p>
+      <p>6. 用户应妥善保管账号密码，勾选「保持在线」后 30 天内免登录。</p>
+      <p>7. 未成年人应在监护人指导下使用，平台对未成年人消费行为保留限制权利。</p>
+      <p>8. 用户数据加密存储，敏感信息脱敏展示，未经授权任何人不得越权访问。</p>
+    </div>
+  </div>
+</div>
+
+<script src="/js/jquery.min.js"></script>
+<script src="/js/license.js"></script>
+<script src="/js/common.js"></script>
+<script>
+$(function () {
+  var TAGS = ['游戏', '唱歌', '美食', '户外', '助眠', '情感', '萌宠', '穿搭', '影视', '电竞', '音乐', '旅行'];
+  $('#tags').html(TAGS.map(function (t) { return '<span class="tp" data-t="' + t + '">' + t + '</span>'; }).join(''));
+  $('#tags').on('click', '.tp', function () {
+    var $t = $(this);
+    if ($t.hasClass('on')) $t.removeClass('on');
+    else if ($('.tp.on').length < 8) $t.addClass('on');
+    else toast('最多选择 8 个标签', 'err');
+  });
+  $('#showAgreement').click(function () { $('#agreeMask').show(); });
+  $('#agreeClose').click(function () { $('#agreeMask').hide(); });
+
+  $('#btnReg').click(async function () {
+    var phone = $('#phone').val().trim(), email = $('#email').val().trim();
+    var username = $('#username').val().trim(), password = $('#password').val();
+    var gender = $('#gender').val(), birthday = $('#birthday').val(), city = $('#city').val().trim();
+    if (!/^1[3-9]\d{9}$/.test(phone)) return toast('手机号格式不正确', 'err');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('邮箱格式不正确', 'err');
+    if (username.length < 2) return toast('用户名至少 2 个字符', 'err');
+    if (password.length < 6) return toast('密码至少 6 位', 'err');
+    if (!birthday) return toast('请选择生日', 'err');
+    if (!city) return toast('请填写所在城市', 'err');
+    if (!$('#agree').prop('checked')) return toast('请先阅读并同意用户协议', 'err');
+    var btn = $(this).prop('disabled', true).text('注册中…');
+    try {
+      var enc = await window.rsaPassword(password);
+      var d = await $.ajax({ url: '/api/register', method: 'POST', contentType: 'application/json', data: JSON.stringify({
+        phone: phone, email: email, username: username, password: enc,
+        gender: gender, birthday: birthday, city: city, agree: true,
+        tags: $('.tp.on').map(function () { return $(this).data('t'); }).get(),
+        fp: window.ZBJ_FP,
+      })});
+      if (!d.ok) { toast(d.msg, 'err'); return; }
+      toast('注册成功，已自动登录');
+      setTimeout(function () { location.href = '/'; }, 800);
+    } catch (e) { toast('网络错误，请重试', 'err'); }
+    finally { btn.prop('disabled', false).text('注 册'); }
+  });
+});
+</script>
+</body>
+</html>

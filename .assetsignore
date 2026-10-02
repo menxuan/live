@@ -1,0 +1,9 @@
+# 不进入公开静态资产的内容（服务端代码与配置不外泄）
+_worker.js
+src
+wrangler.toml
+package.json
+README.md
+.git
+.wrangler
+node_modules

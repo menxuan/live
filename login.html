@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - 直播间</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-box">
+    <h1>登录直播间</h1>
+    <div class="sub">未注册的游客只能观看直播、图文和视频</div>
+    <div class="field"><label>账号</label><input class="input" id="account" placeholder="用户名 / 手机号 / 邮箱"></div>
+    <div class="field"><label>密码</label><input class="input" id="password" type="password" placeholder="RSA 加密传输"></div>
+    <label class="agree"><input type="checkbox" id="keep"><span>保持在线（勾选后 30 天内免登录；离线状态和免打扰状态仍保留）</span></label>
+    <button class="btn btn-primary" id="btnLogin" style="width:100%;">登 录</button>
+    <div class="links"><a href="/register.html">注册新账号</a><a href="/">先随便逛逛</a></div>
+  </div>
+</div>
+
+<script src="/js/jquery.min.js"></script>
+<script src="/js/license.js"></script>
+<script src="/js/common.js"></script>
+<script>
+$(function () {
+  $('#btnLogin').click(async function () {
+    var account = $('#account').val().trim(), password = $('#password').val();
+    if (!account || !password) return toast('请输入账号和密码', 'err');
+    var btn = $(this).prop('disabled', true).text('登录中…');
+    try {
+      var enc = await window.rsaPassword(password);
+      var d = await $.ajax({ url: '/api/login', method: 'POST', contentType: 'application/json',
+        data: JSON.stringify({ account: account, password: enc, keepOnline: $('#keep').prop('checked') }) });
+      if (!d.ok) { toast(d.msg, 'err'); return; }
+      toast('欢迎回来，' + d.username);
+      setTimeout(function () { location.href = d.role === 'admin' ? '/admin.html' : '/'; }, 600);
+    } catch (e) { toast('网络错误，请重试', 'err'); }
+    finally { btn.prop('disabled', false).text('登 录'); }
+  });
+  $('#password').on('keydown', function (e) { if (e.key === 'Enter') $('#btnLogin').click(); });
+});
+</script>
+</body>
+</html>

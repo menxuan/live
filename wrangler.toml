@@ -1,0 +1,32 @@
+# 直播间 · Cloudflare Workers 配置（_worker.js + 静态资产，纯 KV 存储，无 R2）
+# 部署：Workers 和 Pages → 创建 → Workers → 导入 Git 仓库 → 选这个仓库 → 保存并部署
+name = "live"
+main = "_worker.js"
+compatibility_date = "2025-06-01"
+
+# 静态资源（网站根目录；不存在的一律 404，源码文件被 _worker.js 拦截）
+[assets]
+directory = "./"
+binding = "ASSETS"
+
+# KV 命名空间：用户 / 统计 / 内容 / 房间快照
+[[kv_namespaces]]
+binding = "DB"
+id = "a4355d1a011e4cf7af3df7180634ddd1"
+
+# Durable Object：直播间实时大厅（WebSocket 中继 / PK / 礼物红包）
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RoomDO"]
+
+[vars]
+SECRET = "7sK9&tP2qR#5vDg!zX8_bF4hJn6*LcM0"
+ADMIN_USER = "aluo1207"
+ADMIN_PASS = "aluo1207@126.com"
+AI_REVIEW_URL = ""
+AI_REVIEW_TOKEN = ""
+SESSION_TTL = "7200"

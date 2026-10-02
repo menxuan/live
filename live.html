@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直播间</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .live-wrap { display: grid; grid-template-columns: 1fr 320px; gap: 10px; max-width: 1280px; margin: 0 auto; padding: 10px 12px 20px; }
+  .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .stage-head { display: flex; align-items: center; gap: 10px; padding: 4px 6px 10px; flex-wrap: wrap; }
+  .stage-head .t { font-weight: 700; font-size: 15px; }
+  .stage-head .right { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .chat-panel { display: flex; flex-direction: column; height: calc(100vh - 90px); min-height: 420px; }
+  .chat-panel .chat-list { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel); }
+  .chat-input { display: flex; gap: 6px; margin-top: 8px; }
+  .gift-bar { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .gift-bar button { border: 1px solid var(--line); background: var(--panel2); color: var(--txt); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+  .gift-bar button:hover { border-color: var(--gold); color: var(--gold); }
+  .apply-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .pager { display: flex; gap: 8px; justify-content: center; padding-top: 8px; }
+  @media (max-width: 900px) {
+    .live-wrap { grid-template-columns: 1fr; }
+    .chat-panel { height: 60vh; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="logo">直播间</div>
+  <nav><a href="/">首页</a></nav>
+  <div class="right">
+    <span id="roomTypeTag"></span>
+    <span class="muted">余额 <b class="js-balance" style="color:var(--gold);">--</b></span>
+    <span class="js-username muted">游客</span>
+  </div>
+</div>
+
+<div class="live-wrap">
+  <!-- 舞台 -->
+  <div>
+    <div class="stage">
+      <div class="stage-head">
+        <span class="t" id="roomTitle">…</span>
+        <span id="ownerTag"></span>
+        <div class="right" id="ownerControls" style="display:none;">
+          <button class="btn btn-small" data-toggle="danmaku">弹幕开关</button>
+          <button class="btn btn-small" data-toggle="comment">评论开关</button>
+          <button class="btn btn-small" data-toggle="allowUserCam">允许用户摄像头</button>
+          <button class="btn btn-small" data-toggle="allowUserMic">允许用户麦克风</button>
+          <button class="btn btn-small" id="btnCloseRoom" style="border-color:var(--red);color:var(--red);">结束直播</button>
+        </div>
+        <div class="right" id="userControls" style="display:none;">
+          <button class="btn btn-small" id="btnCam">开启摄像头</button>
+          <button class="btn btn-small" id="btnMic">开启麦克风</button>
+          <button class="btn btn-small" id="btnApply">申请上麦</button>
+        </div>
+      </div>
+      <div id="pkBar"></div>
+      <div style="position:relative;">
+        <div class="video-grid" id="grid"></div>
+        <div class="dm-layer" id="dmLayer"></div>
+      </div>
+      <div class="pager"><button class="btn btn-small" id="pagePrev">‹ 上一页</button><span class="muted" id="pageInfo"></span><button class="btn btn-small" id="pageNext">下一页 ›</button></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button class="btn btn-small" id="btnPk">随机连线 PK</button>
+      <button class="btn btn-small" id="btnRp">发红包</button>
+      <button class="btn btn-small" id="btnCopy">复制邀请链接</button>
+      <button class="btn btn-small" id="btnApplies" style="display:none;">上麦申请（<span id="applyCount">0</span>）</button>
+      <span class="muted" style="align-self:center;">在线 <b id="onlineCount">0</b> 人 · 每页最多 9 人</span>
+    </div>
+  </div>
+
+  <!-- 聊天栏 -->
+  <div class="chat-panel">
+    <div class="chat-list" id="chatList"></div>
+    <div class="gift-bar" id="giftBar"></div>
+    <div class="chat-input">
+      <input class="input" id="chatText" placeholder="说点什么…（Enter 发送）">
+      <button class="btn btn-primary btn-small" id="btnDanmaku" title="以弹幕发送">弹幕</button>
+      <button class="btn btn-primary btn-small" id="btnSend">发送</button>
+    </div>
+    <div class="muted" id="guestHint" style="display:none;margin-top:6px;">游客只能观看，登录后才能互动。</div>
+  </div>
+</div>
+
+<div class="modal-mask" id="mask" style="display:none;"><div class="modal" id="modalBox"></div></div>
+
+<script src="/js/jquery.min.js"></script>
+<script src="/js/license.js"></script>
+<script src="/js/common.js"></script>
+<script>
+$(function () {
+  var roomId = new URLSearchParams(location.search).get('id');
+  var ME = null, isOwner = false, room = null;
+  var ws = null, members = [], page = 0;
+  var pcs = {}, localStream = null, camOn = false, micOn = false, micAllowed = false;
+  var GIFTS = [
+    { id: 'flower', name: '鲜花', price: 1, icon: '🌹' }, { id: 'candy', name: '棒棒糖', price: 5, icon: '🍭' },
+    { id: 'plane', name: '飞机', price: 50, icon: '✈️' }, { id: 'rocket', name: '火箭', price: 200, icon: '🚀' },
+    { id: 'castle', name: '城堡', price: 1000, icon: '🏰' },
+  ];
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  // ---------- 初始化 ----------
+  window.refreshMe().then(async function (d) {
+    ME = d.ok ? d : null;
+    if (ME) $('.js-username').text(ME.username);
+    var info = await $.get('/api/room/info?id=' + roomId);
+    if (!info.ok) { toast(info.msg, 'err'); setTimeout(function () { location.href = '/'; }, 1200); return; }
+    room = info.room; isOwner = ME && ME.uid === room.owner;
+    $('#roomTitle').text(room.title);
+    $('#roomTypeTag').html(room.type === 'voice' ? '<span class="tag tag-cyan">语音房</span>' : '<span class="tag tag-red">视频直播</span>');
+    $('#ownerTag').html(isOwner ? '<span class="tag tag-gold">房主</span>' : '');
+    if (room.type === 'voice') $('#btnCam').hide();
+    if (isOwner) { $('#ownerControls').show(); micAllowed = true; }
+    else if (ME) { $('#userControls').show(); micAllowed = room.micAllowed.indexOf(ME.uid) > -1; }
+    else $('#guestHint').show();
+    connect();
+  });
+
+  // ---------- WebSocket ----------
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(proto + '://' + location.host + '/ws/room?room=' + roomId);
+    ws.onmessage = function (e) { onMsg(JSON.parse(e.data)); };
+    ws.onclose = function () { toast('连接已断开', 'err'); };
+    ws.onopen = function () { send({ t: 'hello' }); };
+  }
+  function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+  function onMsg(m) {
+    switch (m.t) {
+      case 'members': members = m.list; $('#onlineCount').text(m.list.length); renderGrid(); syncPeers(); break;
+      case 'join': addChat('sys', m.name + ' 进入了直播间'); break;
+      case 'leave': addChat('sys', '有人离开了直播间'); break;
+      case 'chat': {
+        var lv = m.level ? '<span class="lv" style="color:' + m.level.color + '">Lv.' + m.level.level + '</span>' : '';
+        addChat('', lv + '<span class="c-name" style="color:var(--cyan);">' + esc(m.name) + '：</span>' + esc(m.text));
+        break;
+      }
+      case 'danmaku': flyDm(m.name + '：' + m.text); break;
+      case 'gift': {
+        addChat('sys', m.from + ' 送给 ' + m.to + ' ' + m.gift.icon + ' ' + m.gift.name + ' ×' + m.count + '（' + m.total + ' 元）');
+        giftFly(m.gift.icon + ' ' + m.from + ' 送出 ' + m.gift.name + ' ×' + m.count);
+        if (isOwner) window.refreshMe();
+        break;
+      }
+      case 'redpacket': addChat('sys', '🧧 ' + m.rp.fromName + ' 发出拼手气红包（' + m.rp.amount + ' 元 × ' + m.rp.count + '）');
+        toast(m.rp.fromName + ' 发了红包，快抢！'); grabRp(); break;
+      case 'redpacket:grab': addChat('sys', '🧧 ' + esc(m.name) + ' 抢到 ' + m.got + ' 元' + (m.left > 0 ? '，还剩 ' + m.left + ' 个' : '，已被抢完')); break;
+      case 'applyMic': {
+        var n = $('#applyCount').text(Number($('#applyCount').text()) + 1);
+        $('#btnApplies').show();
+        toast('「' + m.name + '」申请上麦');
+        break;
+      }
+      case 'micAllowed': micAllowed = m.allow; toast(m.allow ? '房主已同意你上麦' : '房主拒绝了你的上麦申请'); if (m.allow) $('#userControls').show(); break;
+      case 'roomFlags': room = $.extend(room, m); toast('房间设置已更新'); break;
+      case 'mediaState': { var mb = members.find(function (x) { return x.uid === m.uid; }); if (mb) { mb.cam = m.cam; mb.mic = m.mic; } renderGrid(); syncPeers(); break; }
+      case 'pk:start': pkBar(m.partner); toast('PK 开始：与「' + m.partner.ownerName + '」连线'); break;
+      case 'pk:end': pkBar(null); toast('PK 已结束'); break;
+      case 'signal': onSignal(m.from, m.data); break;
+      case 'kicked': toast('你已被房主移出直播间', 'err'); setTimeout(function () { location.href = '/'; }, 800); break;
+      case 'closed': toast(m.msg || '直播间已关闭', 'err'); setTimeout(function () { location.href = '/'; }, 1000); break;
+      case 'err': case 'toast': toast(m.msg || m, m.t === 'err' ? 'err' : ''); break;
+    }
+  }
+
+  // ---------- 九宫格渲染（只渲染当前页，其余页不加载） ----------
+  function renderGrid() {
+    var pages = Math.max(1, Math.ceil(members.length / 9));
+    if (page >= pages) page = pages - 1;
+    $('#pageInfo').text((page + 1) + ' / ' + pages);
+    var slice = members.slice(page * 9, page * 9 + 9);
+    $('#grid').html(slice.map(function (m) {
+      return '<div class="video-cell" data-uid="' + m.uid + '">' +
+        '<div class="ph" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);">' + esc(m.name) + '</div>' +
+        '<video autoplay playsinline ' + (m.uid === (ME && ME.uid) ? 'muted' : '') + ' data-v="' + m.uid + '" style="position:relative;z-index:1;"></video>' +
+        '<audio autoplay data-a="' + m.uid + '" style="display:none;"></audio>' +
+        '<span class="cell-name">' + esc(m.name) + (m.isOwner ? ' 👑' : '') + '</span>' +
+        '<span class="cell-mic">' + (m.mic ? '🎙️' : '') + '</span></div>';
+    }).join(''));
+    // 绑定已有流
+    for (var uid in pcs) attachStream(uid);
+    if (localStream) attachStream((ME && ME.uid) || 'me');
+  }
+
+  function attachStream(uid) {
+    var stream = uid === ((ME && ME.uid) || 'me') ? localStream : (pcs[uid] && pcs[uid]._stream);
+    if (!stream) return;
+    $('video[data-v="' + uid + '"]').each(function () { if (this.srcObject !== stream) this.srcObject = stream; });
+    $('audio[data-a="' + uid + '"]').each(function () { if (this.srcObject !== stream) this.srcObject = stream; });
+  }
+
+  // 点击放大 / 再点或点叉退出
+  $(document).on('click', '.video-cell', function (e) {
+    if ($(e.target).hasClass('close-big')) { $(this).removeClass('big').find('.close-big').remove(); return; }
+    var $c = $(this);
+    if ($c.hasClass('big')) { $c.removeClass('big').find('.close-big').remove(); return; }
+    $('.video-cell.big').removeClass('big').find('.close-big').remove();
+    $c.addClass('big').append('<button class="close-big">✕</button>');
+  });
+  $('#pagePrev').click(function () { if (page > 0) { page--; renderGrid(); } });
+  $('#pageNext').click(function () { var p = Math.ceil(members.length / 9); if (page < p - 1) { page++; renderGrid(); } });
+
+  // ---------- WebRTC mesh（信令走 WS，媒体走 P2P，延迟最低） ----------
+  function syncPeers() {
+    if (!ME) return;
+    var myUid = ME.uid;
+    members.forEach(function (m) {
+      if (m.uid === myUid || !(m.cam || m.mic)) return;
+      if (pcs[m.uid]) return;
+      if (myUid < m.uid) makeOffer(m.uid); // 小 uid 一侧发起，避免双向碰撞
+    });
+  }
+
+  async function getLocal() {
+    if (localStream) return localStream;
+    // 只采集一次，避免媒体占用导致听不到对方声音
+    localStream = await navigator.mediaDevices.getUserMedia({ video: room.type === 'video', audio: { echoCancellation: true, noiseSuppression: true } });
+    return localStream;
+  }
+
+  function newPc(uid) {
+    var pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] });
+    pc._stream = null;
+    pc.onicecandidate = function (e) { if (e.candidate) send({ t: 'signal', to: uid, data: { kind: 'candidate', candidate: e.candidate } }); };
+    pc.ontrack = function (e) {
+      var stream = e.streams[0]; pc._stream = stream;
+      attachStream(uid);
+    };
+    pcs[uid] = pc;
+    return pc;
+  }
+
+  async function makeOffer(uid) {
+    try {
+      var pc = pcs[uid] || newPc(uid);
+      if (localStream) localStream.getTracks().forEach(function (tr) { if (!pc.getSenders().find(function (s) { return s.track === tr; })) pc.addTrack(tr, localStream); });
+      var offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      send({ t: 'signal', to: uid, data: { kind: 'offer', sdp: pc.localDescription } });
+    } catch (e) { console.warn('offer fail', e); }
+  }
+
+  async function onSignal(from, data) {
+    try {
+      var pc = pcs[from] || newPc(from);
+      if (data.kind === 'offer') {
+        await pc.setRemoteDescription(data.sdp);
+        if (localStream) localStream.getTracks().forEach(function (tr) { if (!pc.getSenders().find(function (s) { return s.track === tr; })) pc.addTrack(tr, localStream); });
+        var ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+        send({ t: 'signal', to: from, data: { kind: 'answer', sdp: pc.localDescription } });
+      } else if (data.kind === 'answer') {
+        await pc.setRemoteDescription(data.sdp);
+      } else if (data.kind === 'candidate') {
+        await pc.addIceCandidate(data.candidate);
+      }
+    } catch (e) { console.warn('signal fail', e); }
+  }
+
+  // ---------- 摄像头 / 麦克风 / 上麦 ----------
+  $('#btnCam').click(async function () {
+    if (!micAllowed && !isOwner) return toast('请先申请上麦', 'err');
+    if (!camOn) {
+      await getLocal(); camOn = true; send({ t: 'cam', on: true });
+      attachStream(ME.uid);
+    } else {
+      camOn = false; localStream.getVideoTracks().forEach(function (t) { t.enabled = false; }); send({ t: 'cam', on: false });
+    }
+    $(this).text(camOn ? '关闭摄像头' : '开启摄像头');
+  });
+  $('#btnMic').click(async function () {
+    if (!micAllowed && !isOwner) return toast('请先申请上麦', 'err');
+    if (!micOn) {
+      await getLocal(); micOn = true; send({ t: 'mic', on: true });
+      attachStream(ME.uid);
+    } else {
+      micOn = false; localStream.getAudioTracks().forEach(function (t) { t.enabled = false; }); send({ t: 'mic', on: false });
+    }
+    $(this).text(micOn ? '关闭麦克风' : '开启麦克风');
+  });
+  $('#btnApply').click(function () { send({ t: 'applyMic' }); });
+
+  // ---------- 房主控制 ----------
+  $(document).on('click', '[data-toggle]', function () {
+    var key = $(this).data('toggle');
+    send({ t: 'toggle', key: key, val: !room[key] });
+  });
+  $('#btnCloseRoom').click(async function () {
+    if (!confirm('确定结束直播？直播间链接将失效。')) return;
+    await $.ajax({ url: '/api/room/close', method: 'POST', contentType: 'application/json', data: JSON.stringify({ roomId: roomId }) });
+    location.href = '/';
+  });
+  $('#btnApplies').click(function () { /* 申请在消息流提示，简化处理：重新弹提示 */ toast('上麦申请已在上方的提示中处理（让申请人重试或由房主在成员列表管理中处理）'); });
+
+  // ---------- 聊天 / 弹幕 ----------
+  function addChat(cls, html) {
+    var $l = $('#chatList');
+    $l.append('<div class="chat-item ' + cls + '">' + html + '</div>');
+    $l.scrollTop($l[0].scrollHeight);
+  }
+  function flyDm(text) {
+    if (!room.danmaku) return;
+    var $d = $('<div class="dm-item">' + esc(text) + '</div>').appendTo('#dmLayer');
+    $d.css('top', (10 + Math.random() * 55) + '%');
+    setTimeout(function () { $d.remove(); }, 9500);
+  }
+  $('#btnSend').click(function () {
+    var text = $('#chatText').val().trim(); if (!text) return;
+    send({ t: 'chat', text: text }); $('#chatText').val('');
+  });
+  $('#chatText').on('keydown', function (e) { if (e.key === 'Enter') $('#btnSend').click(); });
+  $('#btnDanmaku').click(function () {
+    var text = $('#chatText').val().trim(); if (!text) return;
+    send({ t: 'danmaku', text: text }); $('#chatText').val('');
+  });
+
+  // ---------- 礼物 ----------
+  $('#giftBar').html(GIFTS.map(function (g) {
+    return '<button data-g="' + g.id + '">' + g.icon + ' ' + g.name + ' ¥' + g.price + '</button>';
+  }).join(''));
+  $('#giftBar').on('click', 'button', function () {
+    var g = GIFTS.find(function (x) { return x.id === $(this).data('g'); }, this);
+    send({ t: 'gift', giftId: g.id, count: 1 });
+  });
+  function giftFly(text) {
+    var $g = $('<div class="gift-fly" style="left:' + (30 + Math.random() * 40) + '%;top:' + (40 + Math.random() * 30) + '%;color:var(--gold);">' + esc(text) + '</div>').appendTo('body');
+    setTimeout(function () { $g.remove(); }, 2300);
+  }
+
+  // ---------- 红包 ----------
+  $('#btnRp').click(function () {
+    if (!ME) return toast('登录后才能发红包', 'err');
+    openModal('<h3>发拼手气红包</h3>' +
+      '<div class="field"><label>总金额（元）</label><input class="input" id="rpAmount" type="number" value="10"></div>' +
+      '<div class="field"><label>个数</label><input class="input" id="rpCount" type="number" value="5"></div>' +
+      '<button class="btn btn-primary" id="rpGo" style="width:100%;">发出红包</button>');
+    $('#rpGo').click(function () { send({ t: 'redpacket', amount: $('#rpAmount').val(), count: $('#rpCount').val() }); $('#mask').hide(); });
+  });
+  function grabRp() { setTimeout(function () { send({ t: 'redpacket:grab' }); }, 800 + Math.random() * 1200); }
+
+  // ---------- PK ----------
+  var pkOn = false;
+  $('#btnPk').click(function () {
+    if (!isOwner) return toast('只有房主可以发起 PK', 'err');
+    if (pkOn) { send({ t: 'pk:leave' }); pkOn = false; $('#btnPk').text('随机连线 PK'); }
+    else { send({ t: 'pk:enter' }); pkOn = true; $('#btnPk').text('退出 PK'); }
+  });
+  function pkBar(partner) {
+    if (!partner) { $('#pkBar').empty(); return; }
+    $('#pkBar').html('<div class="pk-bar"><div class="side"><i style="width:100%"></i></div><span class="vs">VS</span>' +
+      '<div class="side right"><i style="width:100%"></i></div></div>' +
+      '<div class="muted" style="text-align:center;">正在与「' + esc(partner.title) + '」（' + esc(partner.ownerName) + '）PK</div>');
+  }
+
+  $('#btnCopy').click(function () {
+    var url = location.href;
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function () { toast('链接已复制，直播间关闭后失效'); }, function () { toast(url); });
+  });
+
+  function openModal(html) { $('#modalBox').html('<button class="m-close">✕</button>' + html); $('#mask').show(); }
+  $(document).on('click', '.m-close', function () { $('#mask').hide(); });
+
+  // 离开页面前关流
+  window.addEventListener('beforeunload', function () {
+    if (localStream) localStream.getTracks().forEach(function (t) { t.stop(); });
+  });
+});
+</script>
+</body>
+</html>

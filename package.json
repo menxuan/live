@@ -1,0 +1,11 @@
+{
+  "name": "zhibojian",
+  "version": "1.0.0",
+  "private": true,
+  "description": "直播间系统 - Cloudflare Worker + KV（无 R2）",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "setup": "node scripts/setup.js"
+  }
+}

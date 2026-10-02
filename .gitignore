@@ -1,0 +1,6 @@
+node_modules
+.wrangler
+.dryrun
+wrangler.toml.bak
+.DS_Store
+.wrangler-dev.log

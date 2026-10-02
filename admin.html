@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>后台管理 - 直播间</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  table.tb td .ops button { margin: 1px 2px; }
+  .stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .stat-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+  .stat-card .v { font-size: 24px; font-weight: 700; color: var(--cyan); }
+  .stat-card .l { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  @media (max-width: 900px) { .stat-cards { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="logo">直播间 · 后台</div>
+  <nav><a href="/">前台首页</a><a href="/dashboard.html" target="_blank">数据大屏</a></nav>
+  <div class="right"><span class="js-username muted"></span><a class="btn btn-small" href="javascript:;" id="btnLogout">退出</a></div>
+</div>
+
+<div class="wrap">
+  <div class="stat-cards" id="statCards"></div>
+  <div class="admin-tabs" id="tabs"></div>
+  <div class="panel"><div id="tabBody"></div></div>
+</div>
+
+<script src="/js/jquery.min.js"></script>
+<script src="/js/license.js"></script>
+<script src="/js/common.js"></script>
+<script>
+$(function () {
+  var TABS = [
+    ['users', '用户管理'], ['reviews', '审核队列'], ['withdraws', '提现审批'],
+    ['recharges', '充值明细'], ['tickets', '客服工单'], ['settings', '审核设置'],
+    ['accounts', '账号创建'], ['licenses', '授权管理'],
+  ];
+  var cur = 'users';
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  window.refreshMe().then(function (d) {
+    if (!d.ok || (d.role !== 'admin' && d.role !== 'cs')) { toast('无权限访问后台', 'err'); setTimeout(function () { location.href = '/login.html'; }, 800); return; }
+    window.MYROLE = d.role;
+    loadStats(); renderTabs(); loadTab();
+    setInterval(loadStats, 30000);
+  });
+  $('#btnLogout').click(async function () { await $.post('/api/logout'); location.href = '/login.html'; });
+
+  function loadStats() {
+    $.get('/api/stats?range=today').then(function (d) {
+      if (!d.ok) return;
+      $('#statCards').html(
+        card(d.total, '累计注册') + card(d.newReg, '今日新增') + card('¥' + d.giftIncome, '今日礼物流水') +
+        card((d.todos.realname + d.todos.content + d.todos.withdraw), '待办审核'));
+    });
+  }
+  function card(v, l) { return '<div class="stat-card"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
+
+  function renderTabs() {
+    $('#tabs').html(TABS.map(function (t) { return '<button data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join(''));
+    $('#tabs button').removeClass('on').filter('[data-tab="' + cur + '"]').addClass('on');
+  }
+  $('#tabs').on('click', 'button', function () { cur = $(this).data('tab'); renderTabs(); loadTab(); });
+
+  function loadTab() {
+    ({ users: tabUsers, reviews: tabReviews, withdraws: tabWithdraws, recharges: tabRecharges,
+       tickets: tabTickets, settings: tabSettings, accounts: tabAccounts, licenses: tabLicenses })[cur]();
+  }
+
+  // ---------- 用户管理 ----------
+  function tabUsers() {
+    $.get('/api/admin/users').then(function (d) {
+      if (!d.ok) return $('#tabBody').html('<div class="muted">' + esc(d.msg) + '</div>');
+      $('#tabBody').html('<table class="tb"><tr><th>用户名</th><th>角色</th><th>性别/生日</th><th>城市</th><th>标签</th><th>设备</th><th>余额</th><th>等级</th><th>实名</th><th>状态</th><th>操作</th></tr>' +
+        d.list.map(function (u) {
+          var rn = u.realname ? (u.realname.status === 'approved' ? '✅' : u.realname.status === 'pending' ? '⏳' : '❌') : '—';
+          return '<tr><td><b>' + esc(u.username) + '</b><div class="muted">' + esc(u.phone) + '</div></td>' +
+            '<td><select data-role="' + u.uid + '">' + ['user', 'streamer', 'cs', 'admin'].map(function (r) { return '<option ' + (u.role === r ? 'selected' : '') + '>' + r + '</option>'; }).join('') + '</select></td>' +
+            '<td>' + esc(u.gender) + '<div class="muted">' + esc(u.birthday) + '</div></td>' +
+            '<td>' + esc(u.city) + '</td><td>' + (u.tags || []).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') + '</td>' +
+            '<td class="muted">' + esc(u.device && u.device.os) + ' / ' + esc(u.device && u.device.type) + '</td>' +
+            '<td style="color:var(--gold);">¥' + u.balance + '</td>' +
+            '<td><span class="lv" style="color:' + u.level.color + '">Lv.' + u.level.level + '</span></td>' +
+            '<td>' + rn + '</td>' +
+            '<td>' + (u.banned ? '<span class="tag tag-red">封禁</span>' : '<span class="tag tag-green">正常</span>') + '</td>' +
+            '<td class="ops">' +
+            '<button class="btn btn-small" data-recharge="' + u.uid + '">充值</button>' +
+            '<button class="btn btn-small" data-pass="' + u.uid + '">查密码</button>' +
+            '<button class="btn btn-small" data-tog="banned" data-uid="' + u.uid + '">' + (u.banned ? '解封' : '封禁') + '</button>' +
+            '<button class="btn btn-small" data-tog="chatBanned" data-uid="' + u.uid + '">' + (u.chatBanned ? '解聊禁' : '禁聊天') + '</button>' +
+            '<button class="btn btn-small" data-tog="dmBanned" data-uid="' + u.uid + '">' + (u.dmBanned ? '解私禁' : '禁私信') + '</button>' +
+            '</td></tr>';
+        }).join('') + '</table>');
+    });
+  }
+  $('#tabBody').on('change', '[data-role]', async function () {
+    var r = await $.ajax({ url: '/api/admin/user/' + $(this).data('role') + '/role', method: 'POST', contentType: 'application/json', data: JSON.stringify({ role: $(this).val() }) });
+    toast(r.ok ? '角色已更新' : r.msg, r.ok ? '' : 'err');
+  });
+  $('#tabBody').on('click', '[data-recharge]', async function () {
+    var amount = prompt('充值金额（元）：'); if (!amount) return;
+    var r = await $.ajax({ url: '/api/admin/recharge', method: 'POST', contentType: 'application/json', data: JSON.stringify({ uid: $(this).data('recharge'), amount: amount }) });
+    toast(r.ok ? '已充值，余额 ¥' + r.balance : r.msg, r.ok ? '' : 'err');
+  });
+  $('#tabBody').on('click', '[data-pass]', async function () {
+    var r = await $.get('/api/admin/user/' + $(this).data('pass') + '/pass');
+    toast(r.ok ? ('密码：' + r.password) : r.msg, r.ok ? '' : 'err');
+  });
+  $('#tabBody').on('click', '[data-tog]', async function () {
+    var r = await $.ajax({ url: '/api/admin/user/' + $(this).data('uid') + '/toggle', method: 'POST', contentType: 'application/json', data: JSON.stringify({ field: $(this).data('tog') }) });
+    if (r.ok) loadTab(); else toast(r.msg, 'err');
+  });
+
+  // ---------- 审核队列 ----------
+  function tabReviews() {
+    $.get('/api/admin/reviews').then(function (d) {
+      $('#tabBody').html((d.list || []).map(function (i) {
+        if (i.kind === 'realname') {
+          return '<div class="kv-line" style="border-bottom:1px solid var(--line);padding:8px 0;">' +
+            '<b>实名认证</b><span>姓名 <b>' + esc(i.name) + '</b></span><span>身份证 ****' + esc(i.idcardTail) + '</span>' +
+            '<span style="margin-left:auto;"><button class="btn btn-small" data-rn="' + i.uid + '" data-pass="1">通过</button> ' +
+            '<button class="btn btn-small btn-danger" data-rn="' + i.uid + '" data-pass="0">拒绝</button></span></div>';
+        }
+        var p = i.post;
+        return '<div class="kv-line" style="border-bottom:1px solid var(--line);padding:8px 0;"><b>内容审核</b><span>作者 <b>' + esc(i.authorName) + '</b></span>' +
+          '<span style="flex:1;min-width:200px;">' + esc(p.text) + '</span>' +
+          (p.image ? '<img src="' + p.image + '" style="max-height:60px;border-radius:4px;">' : '') +
+          '<span><button class="btn btn-small" data-rp="' + p.id + '" data-pass="1">通过</button> ' +
+          '<button class="btn btn-small btn-danger" data-rp="' + p.id + '" data-pass="0">下架</button></span></div>';
+      }).join('') || '<div class="muted">队列为空</div>');
+    });
+  }
+  $('#tabBody').on('click', '[data-rn]', async function () {
+    var r = await $.ajax({ url: '/api/admin/review/realname/' + $(this).data('rn'), method: 'POST', contentType: 'application/json', data: JSON.stringify({ pass: $(this).data('pass') === 1 }) });
+    toast(r.ok ? '已处理' : r.msg, r.ok ? '' : 'err'); loadTab();
+  });
+  $('#tabBody').on('click', '[data-rp]', async function () {
+    var r = await $.ajax({ url: '/api/admin/review/post/' + $(this).data('rp'), method: 'POST', contentType: 'application/json', data: JSON.stringify({ pass: $(this).data('pass') === 1 }) });
+    toast(r.ok ? '已处理' : r.msg, r.ok ? '' : 'err'); loadTab();
+  });
+
+  // ---------- 提现 ----------
+  function tabWithdraws() {
+    $.get('/api/admin/withdraws').then(function (d) {
+      $('#tabBody').html('<table class="tb"><tr><th>用户</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr>' +
+        d.list.map(function (w) {
+          var st = w.status === 'pending' ? '<span class="tag tag-gold">待审核</span>' : w.status === 'approved' ? '<span class="tag tag-green">已批准</span>' : '<span class="tag tag-red">已拒绝</span>';
+          return '<tr><td>' + esc(w.username) + '</td><td style="color:var(--gold);">¥' + w.amount + '</td><td>' + st + (w.note ? '<div class="muted">' + esc(w.note) + '</div>' : '') + '</td><td class="muted">' + new Date(w.at).toLocaleString('zh-CN') + '</td>' +
+            '<td>' + (w.status === 'pending' ? '<button class="btn btn-small" data-wa="' + w.id + '">批准</button> <button class="btn btn-small btn-danger" data-wr="' + w.id + '">拒绝</button>' : '') + '</td></tr>';
+        }).join('') + '</table>');
+    });
+  }
+  $('#tabBody').on('click', '[data-wa]', function () { decideWd($(this).data('wa'), true); });
+  $('#tabBody').on('click', '[data-wr]', function () {
+    var note = prompt('拒绝原因（对账查不上等）：') || ''; decideWd($(this).data('wr'), false, note);
+  });
+  async function decideWd(id, approve, note) {
+    var r = await $.ajax({ url: '/api/admin/withdraw/' + id, method: 'POST', contentType: 'application/json', data: JSON.stringify({ approve: approve, note: note }) });
+    toast(r.ok ? '已处理：' + r.status : r.msg, r.ok ? '' : 'err'); loadTab(); loadStats();
+  }
+
+  // ---------- 充值明细 ----------
+  function tabRecharges() {
+    $.get('/api/admin/recharges').then(function (d) {
+      $('#tabBody').html('<table class="tb"><tr><th>用户</th><th>金额</th><th>时间</th></tr>' +
+        d.list.map(function (r) { return '<tr><td>' + esc(r.username) + '</td><td style="color:var(--gold);">¥' + r.amount + '</td><td class="muted">' + new Date(r.at).toLocaleString('zh-CN') + '</td></tr>'; }).join('') + '</table>');
+    });
+  }
+
+  // ---------- 工单 ----------
+  function tabTickets() {
+    $.get('/api/tickets').then(function (d) {
+      $('#tabBody').html((d.list || []).map(function (t) {
+        return '<div class="kv-line" style="border-bottom:1px solid var(--line);padding:8px 0;"><b>' + esc(t.username) + '</b>' +
+          '<span style="flex:1;">' + esc(t.text) + '</span><span class="muted">' + new Date(t.at).toLocaleString('zh-CN') + '</span>' +
+          (t.rating ? '<span style="color:var(--gold);">★'.repeat(t.rating) + '</span><span class="muted">' + esc(t.comment || '') + '</span>' : '<span class="tag">未评价</span>') + '</div>';
+      }).join('') || '<div class="muted">暂无工单</div>');
+    });
+  }
+
+  // ---------- 设置 ----------
+  function tabSettings() {
+    $.get('/api/admin/settings').then(function (d) {
+      $('#tabBody').html(
+        '<label style="display:flex;gap:8px;align-items:center;margin-bottom:12px;"><input type="checkbox" id="sAuto" ' + (d.autoReview ? 'checked' : '') + '> AI 自动审核（未开启人工审核时，AI 判定合规即发布，违规下架并通知）</label>' +
+        '<label style="display:flex;gap:8px;align-items:center;margin-bottom:12px;"><input type="checkbox" id="sManual" ' + (d.manualReview ? 'checked' : '') + '> 人工审核（开启后全部内容先进审核队列）</label>' +
+        '<div class="muted">登录态有效期：' + d.sessionTtl + ' 秒（保持在线勾选后为 30 天）</div>' +
+        '<button class="btn btn-primary" id="sSave" style="margin-top:12px;">保存</button>');
+      $('#sSave').click(async function () {
+        var r = await $.ajax({ url: '/api/admin/settings', method: 'POST', contentType: 'application/json',
+          data: JSON.stringify({ autoReview: $('#sAuto').prop('checked'), manualReview: $('#sManual').prop('checked') }) });
+        toast(r.ok ? '已保存' : r.msg, r.ok ? '' : 'err');
+      });
+    });
+  }
+
+  // ---------- 创建客服/管理员 ----------
+  function tabAccounts() {
+    $('#tabBody').html('<div class="field" style="max-width:360px;"><label>用户名</label><input class="input" id="aName"></div>' +
+      '<div class="field" style="max-width:360px;"><label>密码</label><input class="input" id="aPass"></div>' +
+      '<div class="field" style="max-width:360px;"><label>类型</label><select class="input" id="aRole"><option value="cs">客服</option><option value="admin">管理员</option></select></div>' +
+      '<button class="btn btn-primary" id="aGo">创建账号</button>');
+    $('#aGo').click(async function () {
+      var r = await $.ajax({ url: '/api/admin/account', method: 'POST', contentType: 'application/json',
+        data: JSON.stringify({ username: $('#aName').val(), password: $('#aPass').val(), role: $('#aRole').val() }) });
+      toast(r.ok ? '创建成功' : r.msg, r.ok ? '' : 'err');
+    });
+  }
+
+  // ---------- 授权管理 ----------
+  function tabLicenses() {
+    $.get('/api/admin/licenses').then(function (d) {
+      $('#tabBody').html('<div class="kv-line" style="margin-bottom:10px;">' +
+        '<span>用户ID：<input class="input" id="lUid" style="width:140px;display:inline-block;padding:4px 8px;"></span>' +
+        '<span>域名：<input class="input" id="lDomain" style="width:160px;display:inline-block;padding:4px 8px;"></span>' +
+        '<span>IP：<input class="input" id="lIp" placeholder="* 不限" style="width:140px;display:inline-block;padding:4px 8px;"></span>' +
+        '<span>时长(天)：<input class="input" id="lDays" value="365" style="width:80px;display:inline-block;padding:4px 8px;"></span>' +
+        '<button class="btn btn-primary btn-small" id="lGo">发放授权</button></div>' +
+        '<table class="tb"><tr><th>用户ID</th><th>密钥</th><th>域名</th><th>IP</th><th>到期时间</th><th>操作</th></tr>' +
+        d.list.map(function (l) {
+          return '<tr><td>' + esc(l.userId) + '</td><td class="muted" style="word-break:break-all;">' + esc(l.key) + '</td><td>' + esc(l.domain) + '</td><td>' + esc(l.ip) + '</td>' +
+            '<td class="' + (l.expireAt < Date.now() ? 'tag tag-red' : '') + '">' + new Date(l.expireAt).toLocaleString('zh-CN') + '</td>' +
+            '<td><button class="btn btn-small btn-danger" data-revoke="' + l.id + '">作废</button></td></tr>';
+        }).join('') + '</table>');
+      $('#lGo').click(async function () {
+        var r = await $.ajax({ url: '/api/admin/licenses', method: 'POST', contentType: 'application/json',
+          data: JSON.stringify({ userId: $('#lUid').val(), domain: $('#lDomain').val(), ip: $('#lIp').val() || '*', days: $('#lDays').val() }) });
+        toast(r.ok ? '已发放（密钥见列表）' : r.msg, r.ok ? '' : 'err'); tabLicenses();
+      });
+    });
+  }
+  $('#tabBody').on('click', '[data-revoke]', async function () {
+    var r = await $.post('/api/admin/licenses/' + $(this).data('revoke') + '/revoke');
+    toast(r.ok ? '已作废' : r.msg, r.ok ? '' : 'err'); tabLicenses();
+  });
+});
+</script>
+</body>
+</html>

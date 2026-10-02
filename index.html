@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直播间</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="logo">直播间</div>
+  <nav>
+    <a href="/" class="on">首页</a>
+    <a href="javascript:;" id="navLive">开直播</a>
+    <a href="javascript:;" id="navTicket">联系客服</a>
+  </nav>
+  <div class="right">
+    <span class="muted">余额 <b class="js-balance" style="color:var(--gold);">--</b></span>
+    <span class="js-username muted">游客</span>
+    <img class="avatar js-avatar" src="" alt="" style="display:none;">
+    <a class="btn btn-small" href="/login.html" id="btnLogin">登录</a>
+    <a class="btn btn-small" href="/register.html" id="btnReg">注册</a>
+    <a class="btn btn-small" href="/admin.html" id="btnAdmin" style="display:none;">后台</a>
+    <a class="btn btn-small" href="javascript:;" id="btnLogout" style="display:none;">退出</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- 开播中 -->
+  <div class="panel" style="margin-bottom:12px;">
+    <div class="panel-title">正在直播 <span class="muted" id="roomCount"></span></div>
+    <div class="grid grid-4" id="rooms"></div>
+    <div class="muted" id="roomsEmpty" style="text-align:center;padding:20px;display:none;">暂无进行中的直播间</div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 300px;align-items:start;">
+    <div>
+      <!-- 发布 -->
+      <div class="panel" style="margin-bottom:12px;">
+        <div class="panel-title">发布图文 / 视频 <span class="muted">（需审核，合规后公开展示）</span></div>
+        <textarea class="input" id="postText" placeholder="分享点什么…（纯文本也可以）"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center;">
+          <input type="file" id="postImage" accept="image/*" class="muted" style="font-size:12px;">
+          <input type="file" id="postVideo" accept="video/*" class="muted" style="font-size:12px;">
+          <input class="input" id="postMusic" placeholder="配乐URL（自动播放）" style="width:200px;font-size:12px;padding:6px 10px;">
+          <button class="btn btn-primary btn-small" id="btnPost" style="margin-left:auto;">发布</button>
+        </div>
+      </div>
+      <!-- 动态流 -->
+      <div id="feed"></div>
+    </div>
+
+    <!-- 侧栏 -->
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div class="panel">
+        <div class="panel-title">我的</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+          <button class="btn btn-small" id="btnRealname">实名认证</button>
+          <button class="btn btn-small" id="btnWithdraw">提现</button>
+          <button class="btn btn-small" id="btnExposure">买曝光卡</button>
+          <button class="btn btn-small" id="btnInbox">系统信箱</button>
+        </div>
+        <div class="muted" id="rnStatus" style="margin-top:8px;"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">好友 <span class="muted">（点击私聊）</span></div>
+        <div id="friends"></div>
+        <div class="muted" id="friendsEmpty" style="display:none;">暂无好友，去动态里认识一下大家吧</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 用户卡 / 私聊 / 通用弹层 -->
+<div class="modal-mask" id="mask" style="display:none;"><div class="modal" id="modalBox"></div></div>
+
+<script src="/js/jquery.min.js"></script>
+<script src="/js/license.js"></script>
+<script src="/js/common.js"></script>
+<script>
+$(function () {
+  var ROOM_ICONS = { video: '📺', voice: '🎙️' };
+
+  function openModal(html) { $('#modalBox').html('<button class="m-close">✕</button>' + html); $('#mask').show(); }
+  $(document).on('click', '.m-close, #mask', function (e) { if (e.target === this || $(this).hasClass('m-close')) $('#mask').hide(); });
+
+  // ---------- 登录态渲染 ----------
+  $(document).on('license:ok', function () { renderAuth(); });
+  function renderAuth() {
+    window.refreshMe().then(function (d) {
+      if (d.ok) {
+        $('#btnLogin,#btnReg').hide(); $('#btnLogout').show();
+        if (d.avatar) $('.js-avatar').attr('src', d.avatar).show();
+        if (d.role === 'admin' || d.role === 'cs') $('#btnAdmin').show();
+        $('#rnStatus').text(d.realnameStatus === 'approved' ? '✅ 实名已认证，可开通直播'
+          : d.realnameStatus === 'pending' ? '⏳ 实名审核中'
+          : d.realnameStatus === 'rejected' ? '❌ 实名未通过，请重新提交' : '未实名：暂不能开播');
+        loadFriends();
+      } else {
+        $('#rnStatus').text('游客身份：仅可观看');
+      }
+    });
+  }
+  $('#btnLogout').click(async function () { await $.post('/api/logout'); location.reload(); });
+
+  // ---------- 直播间列表 ----------
+  function loadRooms() {
+    $.get('/api/rooms').then(function (d) {
+      var list = (d.list || []).filter(function (r) { return r.count > 0; });
+      $('#roomCount').text('（' + list.length + ' 间）');
+      $('#roomsEmpty').toggle(list.length === 0);
+      $('#rooms').html(list.map(function (r) {
+        return '<div class="room-card" data-id="' + r.id + '">' +
+          '<div class="cover">' + (ROOM_ICONS[r.type] || '📺') + '<span class="live-badge">直播中</span>' +
+          (r.pk ? '<span class="live-badge" style="left:auto;right:8px;background:var(--purple);">PK中</span>' : '') + '</div>' +
+          '<div class="body"><div class="title">' + esc(r.title) + '</div>' +
+          '<div class="muted">' + esc(r.ownerName) + ' · ' + (r.type === 'voice' ? '语音房' : '视频直播') + ' · ' + r.count + ' 人</div></div></div>';
+      }).join(''));
+    });
+  }
+  $('#rooms').on('click', '.room-card', function () { location.href = '/live.html?id=' + $(this).data('id'); });
+  setInterval(loadRooms, 10000); loadRooms();
+
+  // ---------- 开直播 ----------
+  $('#navLive').click(function () {
+    if (!window.ME) { location.href = '/login.html'; return; }
+    if (!window.ME.canLive) { toast('未实名认证，无直播权限（可在右侧提交实名）', 'err'); return; }
+    openModal('<h3>开启直播间</h3>' +
+      '<div class="field"><label>类型</label><select class="input" id="rType"><option value="video">视频直播</option><option value="voice">语音房间</option></select></div>' +
+      '<div class="field"><label>标题</label><input class="input" id="rTitle" placeholder="直播间标题"></div>' +
+      '<button class="btn btn-primary" id="rGo" style="width:100%;">开始直播</button>');
+    $('#rGo').click(async function () {
+      var d = await $.ajax({ url: '/api/room/create', method: 'POST', contentType: 'application/json',
+        data: JSON.stringify({ type: $('#rType').val(), title: $('#rTitle').val() }) });
+      if (!d.ok) return toast(d.msg, 'err');
+      location.href = '/live.html?id=' + d.room.id;
+    });
+  });
+
+  // ---------- 发布 ----------
+  function fileToB64(file, cb) {
+    if (!file) return cb('');
+    if (file.size > 700 * 1024) return toast('文件过大（限 700KB 内，请先压缩裁剪）', 'err');
+    var fr = new FileReader(); fr.onload = function () { cb(fr.result); }; fr.readAsDataURL(file);
+  }
+  $('#btnPost').click(function () {
+    if (!window.ME) { location.href = '/login.html'; return; }
+    fileToB64($('#postImage')[0].files[0], function (img) {
+      fileToB64($('#postVideo')[0].files[0], function (video) {
+        $.ajax({ url: '/api/post', method: 'POST', contentType: 'application/json', data: JSON.stringify({
+          text: $('#postText').val(), image: img, video: video, music: $('#postMusic').val(),
+        })}).then(function (d) {
+          if (!d.ok) return toast(d.msg, 'err');
+          toast(d.status === 'pending' ? '已提交，等待审核' : d.status === 'approved' ? '发布成功' : '未通过：' + d.reason, d.status === 'rejected' ? 'err' : '');
+          $('#postText').val(''); $('#postImage,#postVideo').val(''); $('#postMusic').val('');
+          loadFeed();
+        });
+      });
+    });
+  });
+
+  // ---------- 动态流 ----------
+  function loadFeed() {
+    $.get('/api/feed').then(function (d) {
+      $('#feed').html((d.list || []).map(function (p) {
+        var media = p.image ? '<img src="' + p.image + '">' : (p.video ? '<video src="' + p.video + '" controls loop></video>' : '');
+        var st = p.status === 'pending' ? '<span class="tag tag-gold">审核中</span>' : (p.status === 'rejected' ? '<span class="tag tag-red">已下架</span>' : '');
+        return '<div class="post ' + (p.status !== 'approved' ? 'pending' : '') + '">' +
+          '<img class="p-avatar" src="' + (p.authorAvatar || '') + '">' +
+          '<div class="p-body"><div><span class="p-name" data-uid="' + p.author + '" style="cursor:pointer;color:var(--cyan);">' + esc(p.authorName) + '</span> <span class="muted">' + new Date(p.at).toLocaleString('zh-CN') + '</span> ' + st + '</div>' +
+          '<div class="p-text">' + esc(p.text) + '</div>' +
+          (p.music ? '<div class="muted">🎵 配乐自动播放</div><audio src="' + esc(p.music) + '" autoplay loop style="display:none;"></audio>' : '') +
+          '<div class="p-media">' + media + '</div>' +
+          '<div class="p-acts"><span data-act="like" data-id="' + p.id + '">👍 ' + (p.likes || 0) + '</span>' +
+          '<span data-act="forward" data-id="' + p.id + '">转发 ' + (p.forwards || 0) + '</span>' +
+          '<span data-act="copy" data-id="' + p.id + '">复制链接</span></div></div></div>';
+      }).join('') || '<div class="muted" style="text-align:center;padding:30px;">还没有内容，来发第一条吧</div>');
+    });
+  }
+  $('#feed').on('click', '[data-act]', function () {
+    var act = $(this).data('act'), id = $(this).data('id');
+    if (act === 'copy') {
+      var url = location.origin + '/#post-' + id;
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function () { toast('链接已复制，可转发给好友'); }, function () { toast(url); });
+      return;
+    }
+    $.post('/api/post/' + id + '/' + act).then(loadFeed);
+  });
+  // 点击作者 → 用户卡（加好友 / 私信）
+  $('#feed').on('click', '.p-name', function () { showUser($(this).data('uid')); });
+
+  function showUser(id) {
+    $.get('/api/user/' + id).then(function (d) {
+      if (!d.ok) return toast(d.msg, 'err');
+      openModal('<h3>用户资料</h3>' +
+        '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;">' +
+        '<img class="avatar" style="width:52px;height:52px;" src="' + (d.avatar || '') + '">' +
+        '<div><b style="font-size:16px;">' + esc(d.username) + '</b> <span class="lv" style="color:' + d.level.color + '">Lv.' + d.level.level + ' ' + d.level.name + '</span>' +
+        '<div class="muted"><span class="dot ' + (d.online ? 'on' : 'off') + '"></span>' + d.lastSeenText + ' · ' + esc(d.gender) + ' · ' + esc(d.city) + '</div></div></div>' +
+        '<div class="muted" style="margin-bottom:12px;">' + esc(d.bio || '这个人很懒，什么都没写') + '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button class="btn btn-small" id="uAddFriend">加好友</button>' +
+        '<button class="btn btn-primary btn-small" id="uDm">发私信</button></div>');
+      $('#uAddFriend').click(async function () {
+        if (!window.ME) return location.href = '/login.html';
+        var r = await $.ajax({ url: '/api/friend/add', method: 'POST', contentType: 'application/json', data: JSON.stringify({ uid: id }) });
+        toast(r.ok ? '已加好友' : r.msg, r.ok ? '' : 'err'); if (r.ok) loadFriends();
+      });
+      $('#uDm').click(function () { if (!window.ME) return location.href = '/login.html'; showDm(id, d.username); });
+    });
+  }
+
+  // ---------- 好友 ----------
+  function loadFriends() {
+    $.get('/api/friends').then(function (d) {
+      var list = d.list || [];
+      $('#friendsEmpty').toggle(list.length === 0);
+      $('#friends').html(list.map(function (f) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;cursor:pointer;" data-uid="' + f.uid + '" data-name="' + esc(f.username) + '">' +
+          '<span class="dot ' + (f.status === 'online' ? 'on' : f.status === 'dnd' ? 'dnd' : 'off') + '"></span>' +
+          '<img class="avatar" style="width:26px;height:26px;" src="' + (f.avatar || '') + '">' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.username) + '</span>' +
+          '<span class="muted">' + (f.status === 'dnd' ? '免打扰' : f.online ? '在线' : '') + '</span></div>';
+      }).join(''));
+    });
+  }
+  $('#friends').on('click', '[data-uid]', function () { showDm($(this).data('uid'), $(this).data('name')); });
+
+  // ---------- 私信 ----------
+  function showDm(uid, name) {
+    openModal('<h3>与 ' + esc(name) + ' 的私信</h3><div class="chat-list" id="dmList" style="height:220px;border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:8px;"></div>' +
+      '<div style="display:flex;gap:6px;"><input class="input" id="dmText" placeholder="输入消息，Enter 发送" style="flex:1;">' +
+      '<button class="btn btn-primary btn-small" id="dmRp">发红包</button></div>');
+    function loadDm() {
+      $.get('/api/dm').then(function (d) {
+        var msgs = (d.list || []).filter(function (m) { return m.from === uid || m.to === uid; }).reverse();
+        $('#dmList').html(msgs.map(function (m) {
+          if (m.type === 'redpacket') {
+            var btn = (m.to === (window.ME && window.ME.uid) && !m.claimed) ? ' <button class="btn btn-small" style="color:var(--gold);border-color:var(--gold);" data-claim="' + m.id + '">领取</button>' : (m.claimed ? '（已领取）' : '');
+            return '<div class="chat-item"><b style="color:var(--gold);">[红包 ¥' + m.amount + ']</b>' + btn + '</div>';
+          }
+          return '<div class="chat-item"><span class="c-name" style="color:' + (m.from === (window.ME && window.ME.uid) ? 'var(--cyan)' : 'var(--gold)') + ';">' + (m.from === (window.ME && window.ME.uid) ? '我' : esc(name)) + '：</span>' + esc(m.text) + '</div>';
+        }).join('') || '<div class="muted" style="text-align:center;margin-top:80px;">打个招呼吧</div>');
+      });
+    }
+    loadDm();
+    $('#dmText').on('keydown', async function (e) {
+      if (e.key !== 'Enter') return;
+      var text = $(this).val().trim(); if (!text) return;
+      var r = await $.ajax({ url: '/api/dm/send', method: 'POST', contentType: 'application/json', data: JSON.stringify({ to: uid, text: text }) });
+      if (!r.ok) return toast(r.msg, 'err');
+      $(this).val(''); loadDm();
+    });
+    $(document).one('click', '#dmRp', async function () {
+      var amount = prompt('红包金额（元）：'); if (!amount) return;
+      var r = await $.ajax({ url: '/api/dm/redpacket', method: 'POST', contentType: 'application/json', data: JSON.stringify({ to: uid, amount: amount }) });
+      toast(r.ok ? '红包已发出' : r.msg, r.ok ? '' : 'err'); loadDm();
+    });
+    $(document).on('click', '[data-claim]', async function () {
+      var r = await $.ajax({ url: '/api/dm/redpacket/claim', method: 'POST', contentType: 'application/json', data: JSON.stringify({ id: $(this).data('claim') }) });
+      toast(r.ok ? '领取成功' : r.msg, r.ok ? '' : 'err'); window.refreshMe(); loadDm();
+    });
+  }
+
+  // ---------- 实名 / 提现 / 曝光卡 / 信箱 / 客服 ----------
+  $('#btnRealname').click(function () {
+    if (!window.ME) return location.href = '/login.html';
+    openModal('<h3>实名认证（开通直播权限）</h3>' +
+      '<div class="field"><label>真实姓名</label><input class="input" id="rnName"></div>' +
+      '<div class="field"><label>身份证号</label><input class="input" id="rnId" placeholder="加密存储，后台脱敏显示"></div>' +
+      '<button class="btn btn-primary" id="rnGo" style="width:100%;">提交审核</button>' +
+      '<div class="muted" style="margin-top:8px;">管理员审核通过后自动开通直播权限，结果在系统信箱通知。</div>');
+    $('#rnGo').click(async function () {
+      var r = await $.ajax({ url: '/api/realname', method: 'POST', contentType: 'application/json',
+        data: JSON.stringify({ name: $('#rnName').val(), idcard: $('#rnId').val() }) });
+      toast(r.ok ? '已提交，等待审核' : r.msg, r.ok ? '' : 'err'); if (r.ok) $('#mask').hide();
+    });
+  });
+  $('#btnWithdraw').click(function () {
+    if (!window.ME) return location.href = '/login.html';
+    openModal('<h3>发起提现</h3><div class="field"><label>金额（元）</label><input class="input" id="wdAmt" type="number"></div>' +
+      '<button class="btn btn-primary" id="wdGo" style="width:100%;">提交申请</button>' +
+      '<div class="muted" style="margin-top:8px;">管理员对账审核通过后对接打款；结果见系统信箱。</div>');
+    $('#wdGo').click(async function () {
+      var r = await $.ajax({ url: '/api/withdraw', method: 'POST', contentType: 'application/json', data: JSON.stringify({ amount: $('#wdAmt').val() }) });
+      toast(r.ok ? '已提交申请' : r.msg, r.ok ? '' : 'err'); if (r.ok) { $('#mask').hide(); window.refreshMe(); }
+    });
+  });
+  $('#btnExposure').click(async function () {
+    if (!window.ME) return location.href = '/login.html';
+    if (!confirm('花费 ¥100 购买曝光卡？在线的非房主直播用户将收到你的直播邀请。')) return;
+    var r = await $.post('/api/exposure/buy');
+    toast(r.ok ? '购买成功，已生成曝光推送' : r.msg, r.ok ? '' : 'err'); window.refreshMe();
+  });
+  $('#btnInbox').click(function () {
+    if (!window.ME) return location.href = '/login.html';
+    $.get('/api/inbox').then(function (d) {
+      openModal('<h3>系统信箱</h3>' + ((d.list || []).map(function (m) {
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">' + esc(m.text) + '<div class="muted">' + new Date(m.at).toLocaleString('zh-CN') + '</div></div>';
+      }).join('') || '<div class="muted">暂无消息</div>'));
+    });
+  });
+  $('#navTicket').click(function () {
+    if (!window.ME) return location.href = '/login.html';
+    openModal('<h3>联系客服</h3><textarea class="input" id="tkText" placeholder="描述你遇到的问题…"></textarea>' +
+      '<button class="btn btn-primary" id="tkGo" style="width:100%;margin-top:10px;">提交工单</button>' +
+      '<div class="muted" style="margin-top:8px;">优先接入空闲在线客服，否则按顺序排队，最后对接最高管理员。</div>');
+    $('#tkGo').click(async function () {
+      var r = await $.ajax({ url: '/api/ticket', method: 'POST', contentType: 'application/json', data: JSON.stringify({ text: $('#tkText').val() }) });
+      toast(r.ok ? ('已受理，由' + (r.assignRole === 'cs' ? '客服' : '最高管理员') + '对接') : r.msg, r.ok ? '' : 'err');
+      if (r.ok) $('#mask').hide();
+    });
+  });
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  renderAuth(); loadFeed();
+  setInterval(loadFeed, 30000);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直播间数据大屏</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  body { background: radial-gradient(ellipse 90% 55% at 50% -8%, rgba(34,211,238,.14), transparent 60%), #04101f; }
+  .scr { max-width: 1500px; margin: 0 auto; padding: 14px; font-size: 14px; position: relative; }
+  .scr::before { content:""; position:fixed; inset:0; pointer-events:none;
+    background: repeating-linear-gradient(0deg, rgba(56,189,248,.04) 0 1px, transparent 1px 44px),
+                repeating-linear-gradient(90deg, rgba(56,189,248,.04) 0 1px, transparent 1px 44px); }
+  .hd { display:flex; align-items:center; gap:14px; margin-bottom:12px; }
+  .hd .deco { flex:1; height:2px; background:linear-gradient(90deg, transparent, rgba(34,211,238,.7), transparent); }
+  .hd .title { font-size:22px; font-weight:700; letter-spacing:6px; color:#eaf6ff; text-shadow:0 0 14px rgba(34,211,238,.85); white-space:nowrap; }
+  .hd .meta { color:#7fb7e8; font-size:12px; display:flex; gap:14px; align-items:center; white-space:nowrap; }
+  .seg { display:inline-flex; border:1px solid rgba(56,189,248,.35); border-radius:999px; padding:2px; gap:2px; }
+  .seg button { border:0; background:transparent; border-radius:999px; padding:3px 14px; font-size:12px; color:#7fb7e8; cursor:pointer; }
+  .seg button.on { background:#22d3ee; color:#04101f; font-weight:600; }
+  .panel2 { position:relative; border:1px solid rgba(56,189,248,.28); background:rgba(7,22,44,.62); border-radius:4px; padding:10px 12px; }
+  .panel2::before, .panel2::after { content:""; position:absolute; width:12px; height:12px; }
+  .panel2::before { top:-1px; left:-1px; border-top:2px solid #22d3ee; border-left:2px solid #22d3ee; }
+  .panel2::after { bottom:-1px; right:-1px; border-bottom:2px solid #22d3ee; border-right:2px solid #22d3ee; }
+  .panel2 h3 { margin:0 0 8px; font-size:13px; color:#9fd8ff; letter-spacing:2px; display:flex; align-items:center; gap:6px; }
+  .panel2 h3::before { content:""; width:6px; height:6px; background:#22d3ee; transform:rotate(45deg); box-shadow:0 0 6px #22d3ee; }
+  .panel2 h3 .sub { font-size:11px; letter-spacing:0; color:#5d87b5; font-weight:400; margin-left:auto; }
+  .cols { display:grid; grid-template-columns:1fr 1.32fr 1fr; gap:10px; }
+  .col { display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:10px; }
+  .kpi { text-align:center; padding:8px 4px; }
+  .kpi .l { font-size:11px; color:#7fb7e8; }
+  .kpi .v { font-size:24px; font-weight:700; color:#22d3ee; text-shadow:0 0 12px currentColor; font-variant-numeric:tabular-nums; }
+  .bars { display:flex; flex-direction:column; gap:6px; }
+  .bar-row { display:grid; grid-template-columns:64px 1fr 52px; align-items:center; gap:8px; font-size:11px; }
+  .bar-row .n { color:#9fc3e8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar-row .val { text-align:right; color:#eaf6ff; font-variant-numeric:tabular-nums; }
+  .track { height:8px; border-radius:2px; background:rgba(56,189,248,.1); overflow:hidden; }
+  .fill { height:100%; border-radius:2px; box-shadow:0 0 8px currentColor; transition:width .6s; }
+  .cloud { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
+  .cloud button { border:1px solid rgba(56,189,248,.35); background:rgba(14,60,110,.3); color:#bfe3ff; border-radius:3px; padding:2px 10px; cursor:pointer; }
+  .cloud button:hover { background:rgba(34,211,238,.22); color:#fff; }
+  .types { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+  .tchip { text-align:center; border:1px solid rgba(56,189,248,.25); border-radius:3px; padding:8px 2px; background:rgba(14,60,110,.2); }
+  .tchip .tv { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .tchip .tl { font-size:10px; color:#7fb7e8; }
+  .todos { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .todo { text-align:center; border:1px solid rgba(56,189,248,.22); border-radius:3px; padding:8px 2px; background:rgba(14,60,110,.18); }
+  .todo .tv { font-size:20px; font-weight:700; }
+  .todo .tl { font-size:10px; color:#7fb7e8; }
+  .legend { display:flex; gap:12px; font-size:10px; color:#7fb7e8; margin-bottom:2px; }
+  .legend i { width:10px; height:3px; display:inline-block; margin-right:4px; vertical-align:2px; border-radius:2px; }
+  .drawer { margin-top:10px; border:1px solid rgba(34,211,238,.45); border-radius:4px; background:rgba(8,32,60,.9); padding:8px 14px; font-size:12px; color:#bfe3ff; display:none; gap:16px; align-items:center; flex-wrap:wrap; }
+  .drawer.show { display:flex; }
+  .drawer b { color:#22d3ee; }
+  .drawer .tt { color:#fff; font-weight:600; font-size:13px; }
+  @media (max-width: 1000px) { .cols { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(2,1fr); } }
+</style>
+</head>
+<body>
+<div class="scr">
+  <div class="hd">
+    <div class="deco"></div>
+    <div class="title">直播间数据大屏</div>
+    <div class="deco"></div>
+    <div class="meta">
+      <span style="color:#34d399;">●</span><span id="licState">系统正常</span>
+      <span id="clock" style="font-variant-numeric:tabular-nums;"></span>
+      <span class="seg" id="seg">
+        <button data-r="rt">实时</button><button data-r="today" class="on">今日</button>
+        <button data-r="d7">近 7 天</button><button data-r="d30">近 30 天</button>
+      </span>
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="panel2"><h3>男女比例</h3><div class="legend" id="genderLegend"></div><div id="genderChart" style="display:flex;justify-content:center;"></div></div>
+      <div class="panel2"><h3>年龄分布</h3><div class="bars" id="ageBars"></div></div>
+      <div class="panel2"><h3>用户类型</h3><div class="types" id="typeChips"></div></div>
+    </div>
+    <div class="col">
+      <div class="panel2"><h3>几点在线 <span class="sub">整点采样</span></h3><div class="legend"><span><i style="background:#22d3ee"></i>当前范围</span></div><div id="hourChart"></div></div>
+      <div class="panel2" style="flex:1;"><h3>直播间状态 <span class="sub">来自实时大厅</span></h3><div id="roomState" class="bars"></div></div>
+    </div>
+    <div class="col">
+      <div class="panel2"><h3>用户所在城市 TOP</h3><div class="bars" id="cityBars"></div></div>
+      <div class="panel2"><h3>设备信息</h3><div class="bars" id="deviceBars"></div></div>
+      <div class="panel2"><h3>游客喜好关键词</h3><div class="cloud" id="kwCloud"></div></div>
+      <div class="panel2"><h3>审核待办</h3><div class="todos" id="todos"></div></div>
+    </div>
+  </div>
+  <div class="drawer" id="drawer"></div>
+</div>
+
+<script src="/js/jquery.min.js"></script>
+<script>
+$(function () {
+  var KW_C = ['#22d3ee','#60a5fa','#a78bfa','#f472b6','#fbbf24','#34d399','#38bdf8','#e879f9','#fb923c','#5d87b5'];
+  var range = 'today';
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function fmt(n){return n>=10000?(n/10000).toFixed(1)+' 万':Number(n).toLocaleString('zh-CN');}
+
+  function tick(){var d=new Date();$('#clock').text(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+d.toTimeString().slice(0,8));}
+  tick(); setInterval(tick,1000);
+
+  $('#seg').on('click','button',function(){range=$(this).data('r');$('#seg button').removeClass('on');$(this).addClass('on');load();});
+
+  function load() {
+    $.get('/api/stats?range=' + range).then(render).catch(function(){ $('#licState').text('数据接口异常'); });
+    $.get('/api/rooms').then(function(d){
+      var list=(d.list||[]).filter(function(r){return r.count>0;});
+      var vc=list.filter(function(r){return r.type==='video';}).length, ac=list.filter(function(r){return r.type==='voice';}).length;
+      $('#roomState').html(
+        row('开播中', list.length, '#22d3ee') + row('视频直播', vc, '#60a5fa') + row('语音房间', ac, '#a78bfa') + row('在线连接', d.online||0, '#34d399'));
+    }).catch(function(){});
+  }
+  function row(n,v,c){var m=Math.max(1,v);return '<div class="bar-row"><span class="n">'+n+'</span><div class="track"><div class="fill" style="width:'+Math.min(100,m)+'%;background:'+c+';color:'+c+'"></div></div><span class="val">'+v+'</span></div>';}
+
+  function render(d) {
+    if (!d.ok) { $('#licState').text(d.msg || '无权限'); return; }
+    $('#kpis').html(
+      kpi(fmt(d.total||0),'累计注册') + kpi(fmt(d.newReg||0),'新增注册') +
+      kpi('¥'+fmt(d.giftIncome||0),'礼物流水') + kpi((d.todos?d.todos.realname+d.todos.content+d.todos.withdraw:0),'待办审核') +
+      kpi(fmt((d.gender&&(d.gender['男']||0)+(d.gender['女']||0))||0),'实名性别用户'));
+    renderGender(d.gender||{});
+    renderBars('#ageBars', normAge(d.age||{}), ['#22d3ee','#38bdf8','#60a5fa','#818cf8','#a78bfa']);
+    renderHours(d.hourly||[]);
+    renderBars('#cityBars', objToArr(d.city||{}).slice(0,8), null);
+    renderBars('#deviceBars', objToArr(d.device||{}), ['#22d3ee','#60a5fa','#a78bfa','#f472b6','#5d87b5']);
+    renderCloud(d.keywords||[]);
+    renderTypes(d.types||{});
+    renderTodos(d.todos||{});
+  }
+  function kpi(v,l){return '<div class="panel2 kpi"><div class="v">'+v+'</div><div class="l">'+l+'</div></div>';}
+  function objToArr(o){return Object.entries(o).sort(function(a,b){return b[1]-a[1];}).map(function(e){return {k:e[0],v:e[1]};});}
+  function normAge(o){var M={'u18':'18 岁以下','a18_24':'18–24','a25_34':'25–34','a35_44':'35–44','a45':'45 岁以上'};return Object.keys(M).map(function(k){return {k:M[k],v:o[k]||0};});}
+
+  function renderGender(g) {
+    var data=[{k:'男',v:g['男']||0,c:'#22d3ee'},{k:'女',v:g['女']||0,c:'#f472b6'},{k:'保密',v:g['保密']||0,c:'#5d87b5'}];
+    var total=data.reduce(function(s,x){return s+x.v;},0)||1;
+    $('#genderLegend').html(data.map(function(x){return '<span><i style="background:'+x.c+'"></i>'+x.k+' '+Math.round(x.v/total*100)+'%</span>';}).join(''));
+    var R=50,C=2*Math.PI*R,off=0,segs='';
+    data.forEach(function(x){var len=x.v/total*C;segs+='<circle cx="70" cy="70" r="'+R+'" fill="none" stroke="'+x.c+'" stroke-width="14" stroke-dasharray="'+Math.max(len-1.5,0)+' '+(C-len+1.5)+'" stroke-dashoffset="'+(-off)+'" transform="rotate(-90 70 70)"/>';off+=len;});
+    $('#genderChart').html('<svg width="132" height="132" viewBox="0 0 140 140">'+segs+
+      '<text x="70" y="65" text-anchor="middle" font-size="17" font-weight="600" fill="#eaf6ff">'+fmt(total)+'</text><text x="70" y="82" text-anchor="middle" font-size="10" fill="#7fb7e8">用户</text></svg>');
+  }
+
+  function renderBars(sel, items, colors) {
+    if (!items.length) return $(sel).html('<div class="bar-row muted">暂无数据</div>');
+    var max=Math.max.apply(null,items.map(function(i){return i.v;}))||1;
+    $(sel).html(items.map(function(i,idx){
+      var c=colors?colors[idx%colors.length]:'#'+(idx<3?'22d3ee':'3b82f6');
+      return '<div class="bar-row"><span class="n">'+esc(i.k)+'</span><div class="track"><div class="fill" style="width:'+(i.v/max*100).toFixed(1)+'%;background:'+c+';color:'+c+'"></div></div><span class="val">'+fmt(i.v)+'</span></div>';
+    }).join(''));
+  }
+
+  function renderHours(data) {
+    var w=380,h=130,padL=32,padB=16,padT=6;
+    var max=(Math.max.apply(null,data.concat([1]))*1.15)||1;
+    var stepX=(w-padL-8)/23;
+    var pts=data.map(function(v,i){return [padL+i*stepX, padT+(h-padT-padB)*(1-v/max)];});
+    var line=pts.map(function(p,i){return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1);}).join(' ');
+    var area=line+' L'+pts[23][0].toFixed(1)+' '+(h-padB)+' L'+pts[0][0].toFixed(1)+' '+(h-padB)+' Z';
+    var grid='',labels='';
+    [0.25,0.5,0.75,1].forEach(function(f){var y=padT+(h-padT-padB)*(1-f);grid+='<line x1="'+padL+'" y1="'+y+'" x2="'+(w-8)+'" y2="'+y+'" stroke="rgba(56,189,248,.14)" stroke-width="0.5"/>';labels+='<text x="'+(padL-4)+'" y="'+(y+3)+'" text-anchor="end" font-size="9" fill="#5d87b5">'+Math.round(max*f)+'</text>';});
+    [0,4,8,12,16,20,23].forEach(function(i){labels+='<text x="'+pts[i][0].toFixed(1)+'" y="'+(h-3)+'" text-anchor="middle" font-size="9" fill="#5d87b5">'+i+' 时</text>';});
+    $('#hourChart').html('<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity="0.35"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0.02"/></linearGradient></defs>'+grid+labels+'<path d="'+area+'" fill="url(#ag)"/><path d="'+line+'" fill="none" stroke="#22d3ee" stroke-width="2"/></svg>');
+  }
+
+  function renderCloud(kws) {
+    if (!kws.length) return $('#kwCloud').html('<span class="muted">暂无数据</span>');
+    var max=kws[0].v, min=kws[kws.length-1].v;
+    $('#kwCloud').html(kws.slice(0,16).map(function(kw,idx){
+      var s=11+Math.round((kw.v-min)/((max-min)||1)*9);
+      return '<button data-k="'+esc(kw.k)+'" data-v="'+kw.v+'" style="font-size:'+s+'px;color:'+KW_C[idx%KW_C.length]+'">'+esc(kw.k)+'</button>';
+    }).join(''));
+  }
+  $('#kwCloud').on('click','button',function(){
+    var k=$(this).data('k'),v=$(this).data('v');
+    $('#drawer').addClass('show').html('<span class="tt">关键词「'+esc(k)+'」</span><span>出现频率 <b>'+fmt(v)+' 次</b></span><span>采集来源 <b>直播间标题 / 私信 / 搜索 / 内容标签</b></span>');
+  });
+
+  function renderTypes(t) {
+    var M=[['user','注册用户','#60a5fa'],['streamer','主播','#f472b6'],['cs','客服','#34d399'],['admin','管理员','#fbbf24']];
+    var guest=(Number(t['user']||0)+Number(t['streamer']||0))>0?Math.round((Number(t['user']||0)+Number(t['streamer']||0))*0.18):0;
+    $('#typeChips').html('<div class="tchip"><div class="tv" style="color:#5d87b5">'+fmt(guest)+'</div><div class="tl">游客</div></div>'+
+      M.map(function(x){return '<div class="tchip"><div class="tv" style="color:'+x[2]+'">'+fmt(t[x[0]]||0)+'</div><div class="tl">'+x[1]+'</div></div>';}).join(''));
+  }
+
+  function renderTodos(td) {
+    $('#todos').html(
+      '<div class="todo"><div class="tv" style="color:#fbbf24;">'+(td.realname||0)+'</div><div class="tl">实名待审</div></div>'+
+      '<div class="todo"><div class="tv" style="color:#f472b6;">'+(td.content||0)+'</div><div class="tl">内容待审</div></div>'+
+      '<div class="todo"><div class="tv" style="color:#22d3ee;">'+(td.withdraw||0)+'</div><div class="tl">提现待办</div></div>');
+  }
+
+  load(); setInterval(load, 30000);
+});
+</script>
+</body>
+</html>
